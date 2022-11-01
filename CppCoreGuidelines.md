@@ -1,7 +1,6 @@
 # <a name="main"></a>C++ Core Guidelines
 
-September 23, 2022
-
+October 6, 2022
 
 Editors:
 
@@ -2378,6 +2377,7 @@ Parameter passing semantic rules:
 * [F.46: `int` is the return type for `main()`](#Rf-main)
 * [F.47: Return `T&` from assignment operators](#Rf-assignment-op)
 * [F.48: Don't `return std::move(local)`](#Rf-return-move-local)
+* [F.49: Don't return `const T`](#Rf-return-const)
 
 Other function rules:
 
@@ -3157,25 +3157,6 @@ If you have multiple values to return, [use a tuple](#Rf-out-multi) or similar m
 
 A `struct` of many (individually cheap-to-move) elements might be in aggregate expensive to move.
 
-##### Note
-
-It is not recommended to return a `const` value.
-Such older advice is now obsolete; it does not add value, and it interferes with move semantics.
-
-    const vector<int> fct();    // bad: that "const" is more trouble than it is worth
-
-    void g(vector<int>& vx)
-    {
-        // ...
-        fct() = vx;   // prevented by the "const"
-        // ...
-        vx = fct(); // expensive copy: move semantics suppressed by the "const"
-        // ...
-    }
-
-The argument for adding `const` to a return value is that it prevents (very rare) accidental access to a temporary.
-The argument against is that it prevents (very frequent) use of move semantics.
-
 ##### Exceptions
 
 * For non-concrete types, such as types in an inheritance hierarchy, return the object by `unique_ptr` or `shared_ptr`.
@@ -3218,7 +3199,6 @@ The return value optimization doesn't handle the assignment case, but the move a
 ##### Enforcement
 
 * Flag reference to non-`const` parameters that are not read before being written to and are a type that could be cheaply returned; they should be "out" return values.
-* Flag returning a `const` value. To fix: Remove `const` to return a non-`const` value instead.
 
 ### <a name="Rf-out-multi"></a>F.21: To return multiple "out" values, prefer returning a struct or tuple
 
@@ -3271,14 +3251,14 @@ In such cases, passing the object by reference [`T&`](#Rf-inout) is usually the 
 Explicitly passing an in-out parameter back out again as a return value is often not necessary.
 For example:
 
-    istream& operator>>(istream& is, string& s);    // much like std::operator>>()
+    istream& operator>>(istream& in, string& s);    // much like std::operator>>()
 
-    for (string s; cin >> s; ) {
+    for (string s; in >> s; ) {
         // do something with line
     }
 
-Here, both `s` and `cin` are used as in-out parameters.
-We pass `cin` by (non-`const`) reference to be able to manipulate its state.
+Here, both `s` and `in` are used as in-out parameters.
+We pass `in` by (non-`const`) reference to be able to manipulate its state.
 We pass `s` to avoid repeated allocations.
 By reusing `s` (passed by reference), we allocate new memory only when we need to expand `s`'s capacity.
 This technique is sometimes called the "caller-allocated out" pattern and is particularly useful for types,
@@ -3286,11 +3266,11 @@ such as `string` and `vector`, that needs to do free store allocations.
 
 To compare, if we passed out all values as return values, we would something like this:
 
-    pair<istream&, string> get_string(istream& is)  // not recommended
+    pair<istream&, string> get_string(istream& in)  // not recommended
     {
         string s;
-        is >> s;
-        return {is, move(s)};
+        in >> s;
+        return {in, move(s)};
     }
 
     for (auto p = get_string(cin); p.first; ) {
@@ -3910,7 +3890,6 @@ This was primarily to avoid code of the form `(a = b) = c` -- such code is not c
 This should be enforced by tooling by checking the return type (and return
 value) of any assignment operator.
 
-
 ### <a name="Rf-return-move-local"></a>F.48: Don't `return std::move(local)`
 
 ##### Reason
@@ -3936,6 +3915,35 @@ With guaranteed copy elision, it is now almost always a pessimization to express
 ##### Enforcement
 
 This should be enforced by tooling by checking the return expression .
+
+### <a name="Rf-return-const"></a>F.49: Don't return `const T`
+
+##### Reason
+
+It is not recommended to return a `const` value.
+Such older advice is now obsolete; it does not add value, and it interferes with move semantics.
+
+##### Example
+
+    const vector<int> fct();    // bad: that "const" is more trouble than it is worth
+
+    void g(vector<int>& vx)
+    {
+        // ...
+        fct() = vx;   // prevented by the "const"
+        // ...
+        vx = fct(); // expensive copy: move semantics suppressed by the "const"
+        // ...
+    }
+
+The argument for adding `const` to a return value is that it prevents (very rare) accidental access to a temporary.
+The argument against is that it prevents (very frequent) use of move semantics.
+
+**See also**: [F.20, the general item about "out" output values](#Rf-out)
+
+##### Enforcement
+
+* Flag returning a `const` value. To fix: Remove `const` to return a non-`const` value instead.
 
 
 ### <a name="Rf-capture-vs-overload"></a>F.50: Use a lambda when a function won't do (to capture local variables, or to write a local function)
@@ -4072,6 +4080,12 @@ Pointers and references to locals shouldn't outlive their scope. Lambdas that ca
     // Since a copy of local is made, it will
     // always be available for the call.
     thread_pool.queue_work([=] { process(local); });
+
+##### Note
+
+If a non-local pointer must be captured, consider using `unique_ptr`; this handles both lifetime and synchronization.
+
+If the `this` pointer must be captured, consider using `[*this]` capture, which creates a copy of the entire object.
 
 ##### Enforcement
 
@@ -6373,8 +6387,8 @@ Here is a way to move a pointer without a test (imagine it as code in the implem
     // move from other.ptr to this->ptr
     T* temp = other.ptr;
     other.ptr = nullptr;
-    delete ptr;
-    ptr = temp;
+    delete ptr; // in self-move, this->ptr is also null; delete is a no-op
+    ptr = temp; // in self-move, the original ptr is restored
 
 ##### Enforcement
 
@@ -9548,8 +9562,30 @@ Instead, use a local variable:
 
 ##### Enforcement
 
-* (Moderate) Warn if an object is allocated and then deallocated on all paths within a function. Suggest it should be a local `auto` stack object instead.
+* (Moderate) Warn if an object is allocated and then deallocated on all paths within a function. Suggest it should be a local stack object instead.
 * (Simple) Warn if a local `Unique_pointer` or `Shared_pointer` is not moved, copied, reassigned or `reset` before its lifetime ends.
+Exception: Do not produce such a warning on a local `Unique_pointer` to an unbounded array. (See below.)
+
+##### Exception
+
+It is OK to create a local `const unique_ptr<T[]>` to a heap-allocated buffer, as this is a valid way to represent a scoped dynamic array.
+
+##### Example
+
+A valid use case for a local `const unique_ptr<T[]>` variable:
+
+    int get_median_value(const std::list<int>& integers)
+    {
+      const auto size = integers.size();
+
+      // OK: declaring a local unique_ptr<T[]>.
+      const auto local_buffer = std::make_unique_for_overwrite<int[]>(size);
+
+      std::copy_n(begin(integers), size, local_buffer.get());
+      std::nth_element(local_buffer.get(), local_buffer.get() + size/2, local_buffer.get() + size);
+
+      return local_buffer[size/2];
+    }
 
 ### <a name="Rr-global"></a>R.6: Avoid non-`const` global variables
 
@@ -11104,11 +11140,12 @@ increases readability, and it has zero or near zero run-time cost.
         // ... no assignment to p2 ...
         vector<int> v(7);
         v.at(7) = 0;                    // exception thrown
+        delete p2;                      // too late to prevent leaks
         // ...
     }
 
 If `leak == true` the object pointed to by `p2` is leaked and the object pointed to by `p1` is not.
-The same is the case when `at()` throws.
+The same is the case when `at()` throws. In both cases, the `delete p2` statement is not reached.
 
 ##### Enforcement
 
@@ -21046,7 +21083,7 @@ Prefer [construction](#Res-construct) or [named casts](#Res-casts-named) or `T{e
 [always initialize](#Res-always),
 possibly using [default constructors](#Rc-default0) or
 [default member initializers](#Rc-in-class-initializer).
-* <a name="Pro-type-unon"></a>Type.7: Avoid naked union:
+* <a name="Pro-type-union"></a>Type.7: Avoid naked union:
 [Use `variant` instead](#Ru-naked).
 * <a name="Pro-type-varargs"></a>Type.8: Avoid varargs:
 [Don't use `va_arg` arguments](#F-varargs).
