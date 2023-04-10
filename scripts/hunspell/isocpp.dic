@@ -200,6 +200,7 @@ foobar
 Foobar
 FOOBAR
 fopen
+fprintf's
 fs
 func
 func1
@@ -346,6 +347,7 @@ Murray93
 mutex
 mutexes
 mx
+My_vector
 MyCustomError
 MyException
 myMap
@@ -410,6 +412,7 @@ pb2
 pc
 performant
 pessimization
+picture1
 pimpl
 Pimpl
 Pirkelbauer
@@ -564,6 +567,7 @@ Stroustrup94
 Stroustrup's
 struct
 structs
+subobject
 subobjects
 suboperations
 subsetting
@@ -594,7 +598,7 @@ tmp
 TMP
 tock
 TODO
-toLower
+tolower
 toolchains
 TotallyOrdered
 TP
